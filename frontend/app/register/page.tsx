@@ -62,7 +62,12 @@ export default function RegisterPage() {
       const data = await res.json()
       if (!res.ok) {
         setError(data.detail ?? data.error ?? 'Error al registrar')
+      } else if (data.checkout_url) {
+        // Basic / Pro: redirigir a Stripe Checkout
+        window.location.href = data.checkout_url
+        return
       } else {
+        // Enterprise: mostrar key directamente
         setResult(data)
         setStep('success')
       }

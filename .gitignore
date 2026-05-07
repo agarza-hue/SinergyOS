@@ -1,0 +1,6 @@
+frontend/.next/
+frontend/node_modules/
+core/brain/__pycache__/
+core/brain/.env
+*.pyc
+*.bak

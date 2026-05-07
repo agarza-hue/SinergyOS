@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell,
 } from 'recharts'
-import { TrendingDown, Zap, DollarSign, Activity, RefreshCw, ChevronLeft, Info, Layers, AlertTriangle, CheckCircle, Bell } from 'lucide-react'
+import { TrendingDown, Zap, DollarSign, Activity, RefreshCw, ChevronLeft, Info, Layers, AlertTriangle, CheckCircle, Bell, Shield, Users, Key, RotateCcw, Trash2, Plus, Copy, ChevronRight } from 'lucide-react'
 
 // ── AI Logos (SVG) ─────────────────────────────────────────────────────────
 
@@ -79,6 +79,7 @@ interface OpenAIHeaders { req_limit:number; req_remaining:number; req_reset:stri
 interface UsageProvider { provider:string; input_tokens:number; output_tokens:number; cache_tokens:number; actual_cost:number; queries:number; first_seen:string }
 interface UsageMonth { month:string; provider:string; tokens:number; cost:number; queries:number }
 interface LimitsData { ts:string; anthropic:{provider:string;headers:AnthropicHeaders;error:string|null}; openai:{provider:string;headers:OpenAIHeaders;error:string|null}; usage:{by_provider:UsageProvider[];by_month:UsageMonth[];today:{q:number;cost:number}}; cached:boolean; cache_age_s:number }
+interface TenantRow { id:number; slug:string; name:string; plan:string; req_used:number; req_limit:number; usage_pct:number; is_admin:boolean }
 
 // ── Topic metadata ─────────────────────────────────────────────────────────
 
@@ -739,7 +740,7 @@ function tierLabel(reqLimit: number, tokLimit: number, provider: 'anthropic' | '
 // ── Main dashboard ─────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [tab, setTab] = useState<'resumen'|'modelos'|'temas'|'limites'|'suscripciones'|'topologia'>('resumen')
+  const [tab, setTab] = useState<'resumen'|'modelos'|'temas'|'limites'|'suscripciones'|'topologia'|'tenants'>('resumen')
   const [summary,      setSummary]      = useState<CostSummary|null>(null)
   const [providers,    setProviders]    = useState<ByProvider[]>([])
   const [topics,       setTopics]       = useState<ByTopic[]>([])
@@ -751,6 +752,14 @@ export default function Dashboard() {
   const [budgetOpenAI,    setBudgetOpenAI]    = useState<number>(50)
   const [loading,      setLoading]      = useState(true)
   const [refreshing,   setRefreshing]   = useState(false)
+  // Tenants (InsForge)
+  const [tenants,        setTenants]        = useState<TenantRow[]>([])
+  const [tenantsLoading, setTenantsLoading] = useState(false)
+  const [newSlug,        setNewSlug]        = useState('')
+  const [newName,        setNewName]        = useState('')
+  const [newPlan,        setNewPlan]        = useState('basic')
+  const [creating,       setCreating]       = useState(false)
+  const [copiedKey,      setCopiedKey]      = useState<string|null>(null)
 
   const loadData = useCallback(async (isRefresh=false) => {
     if (isRefresh) setRefreshing(true)
@@ -781,8 +790,41 @@ export default function Dashboard() {
     setLimitsLoading(false)
   }, [])
 
+  const loadTenants = useCallback(async () => {
+    setTenantsLoading(true)
+    try {
+      const data = await fetch('/sinergy/api/tenants', { cache: 'no-store' }).then(r => r.json())
+      if (Array.isArray(data)) setTenants(data)
+    } catch { /* silent */ }
+    setTenantsLoading(false)
+  }, [])
+
+  const tenantAction = async (action: string, slug: string) => {
+    await fetch(`/sinergy/api/tenants?action=${action}&slug=${slug}`, { method: 'POST' })
+    loadTenants()
+  }
+
+  const createTenant = async () => {
+    if (!newSlug.trim() || !newName.trim()) return
+    setCreating(true)
+    await fetch(`/sinergy/api/tenants?action=create&slug=${newSlug}`, {
+      method: 'POST',
+      body: JSON.stringify({ slug: newSlug, name: newName, plan: newPlan }),
+    })
+    setNewSlug(''); setNewName(''); setNewPlan('basic')
+    setCreating(false)
+    loadTenants()
+  }
+
+  const copyKey = (key: string) => {
+    navigator.clipboard.writeText(key)
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(null), 2000)
+  }
+
   useEffect(()=>{ loadData() },[loadData])
   useEffect(()=>{ if(tab==='limites') loadLimits() },[tab, loadLimits])
+  useEffect(()=>{ if(tab==='tenants') loadTenants() },[tab, loadTenants])
 
   const lt          = summary?.lifetime
   const totalTokens = (lt?.input_tokens??0) + (lt?.output_tokens??0)
@@ -813,6 +855,7 @@ export default function Dashboard() {
     { id:'limites',       label:'Límites & Alertas' },
     { id:'suscripciones', label:'Suscripciones'  },
     { id:'topologia',     label:'⬡ Topología'    },
+    { id:'tenants',       label:'⚡ Tenants'      },
   ] as const
 
   return (
@@ -846,9 +889,9 @@ export default function Dashboard() {
             </nav>
             {tab!=='suscripciones' && tab!=='topologia' && (
               <button
-                onClick={()=> tab==='limites' ? loadLimits() : loadData(true)}
+                onClick={()=> tab==='limites' ? loadLimits() : tab==='tenants' ? loadTenants() : loadData(true)}
                 className="p-1.5 text-white/30 hover:text-white transition-colors">
-                <RefreshCw size={14} className={(refreshing||limitsLoading)?'animate-spin':''}/>
+                <RefreshCw size={14} className={(refreshing||limitsLoading||tenantsLoading)?'animate-spin':''}/>
               </button>
             )}
           </div>
@@ -1456,6 +1499,199 @@ export default function Dashboard() {
                 El routing inteligente elige automáticamente el modelo más económico para cada tipo de query,
                 optimizando entre GPT-4o-mini ($0.15/MTok) → GPT-4o ($2.50/MTok) → Claude Sonnet ($3.00/MTok).
                 El tab &ldquo;Por Tema&rdquo; desglosa exactamente cuánto costó cada área de tu negocio.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── TENANTS (InsForge) ─────────────────────────────────────── */}
+        {tab==='tenants' && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
+                <Users size={18} className="text-violet-400"/>
+              </div>
+              <div>
+                <h2 className="font-semibold text-white">InsForge — Tenants</h2>
+                <p className="text-xs text-white/30">Gestión multi-tenant · API keys · Uso por plan</p>
+              </div>
+            </div>
+
+            {/* Resumen rápido */}
+            {!tenantsLoading && tenants.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label:'Total tenants', value: tenants.length, color:'text-white' },
+                  { label:'Admins',        value: tenants.filter(t=>t.is_admin).length, color:'text-violet-400' },
+                  { label:'Requests hoy',  value: tenants.reduce((s,t)=>s+t.req_used,0).toLocaleString(), color:'text-green-400' },
+                  { label:'Plan Pro+',     value: tenants.filter(t=>t.plan!=='basic').length, color:'text-amber-400' },
+                ].map(c=>(
+                  <div key={c.label} className="rounded-xl border border-white/8 bg-[#1a1a1a] p-4">
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest mb-1">{c.label}</p>
+                    <p className={`text-2xl font-black tabular-nums ${c.color}`}>{c.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Tabla de tenants */}
+            {tenantsLoading ? (
+              <div className="flex items-center justify-center h-40 text-white/20 text-sm gap-2">
+                <RefreshCw size={14} className="animate-spin"/> Cargando tenants…
+              </div>
+            ) : tenants.length === 0 ? (
+              <div className="text-white/20 text-sm py-20 text-center">Sin tenants registrados</div>
+            ) : (
+              <div className="rounded-xl border border-white/8 bg-[#1a1a1a] overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/8 text-white/25 text-[11px] uppercase tracking-wider">
+                      {['Tenant','Plan','Uso del mes','API Key','Acciones'].map(h=>(
+                        <th key={h} className="text-left px-5 py-3 font-medium">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenants.map(t => {
+                      const pct = t.req_limit >= 999999 ? null : t.usage_pct
+                      const barColor = !pct ? 'bg-violet-500' : pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-green-500'
+                      const planColor: Record<string,string> = { basic:'text-white/40', pro:'text-amber-400', enterprise:'text-violet-400' }
+                      return (
+                        <tr key={t.id} className="border-b border-white/5 hover:bg-white/2">
+                          {/* Nombre */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2">
+                              {t.is_admin && (
+                                <span title="Admin — sin restricciones">
+                                  <Shield size={13} className="text-violet-400 shrink-0"/>
+                                </span>
+                              )}
+                              <div>
+                                <p className="font-medium text-white">{t.name}</p>
+                                <p className="text-[11px] text-white/30 font-mono">{t.slug}</p>
+                              </div>
+                            </div>
+                          </td>
+                          {/* Plan */}
+                          <td className="px-5 py-4">
+                            <span className={`text-xs font-semibold uppercase ${planColor[t.plan]??'text-white/50'}`}>
+                              {t.plan}
+                            </span>
+                          </td>
+                          {/* Uso */}
+                          <td className="px-5 py-4">
+                            {t.req_limit >= 999999 ? (
+                              <span className="text-xs text-violet-400 font-mono">
+                                {t.req_used.toLocaleString()} / ∞
+                              </span>
+                            ) : (
+                              <div className="w-36">
+                                <div className="flex justify-between text-[10px] text-white/35 mb-1">
+                                  <span className="font-mono">{t.req_used.toLocaleString()}</span>
+                                  <span className="font-mono">{t.req_limit.toLocaleString()}</span>
+                                </div>
+                                <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
+                                  <div className={`h-full ${barColor} rounded-full transition-all`}
+                                    style={{width:`${Math.min(pct??0,100)}%`}}/>
+                                </div>
+                                <p className="text-[10px] text-white/30 mt-0.5 text-right">{pct}%</p>
+                              </div>
+                            )}
+                          </td>
+                          {/* API Key */}
+                          <td className="px-5 py-4">
+                            <button
+                              onClick={()=>copyKey(t.slug)}
+                              className="flex items-center gap-1.5 text-[11px] font-mono text-white/30 hover:text-white/60 transition-colors group"
+                              title="Copiar slug (la key completa está en el detalle)">
+                              <span>{t.slug.substring(0,8)}…</span>
+                              {copiedKey===t.slug
+                                ? <CheckCircle size={11} className="text-green-400"/>
+                                : <Copy size={11} className="opacity-0 group-hover:opacity-100"/>}
+                            </button>
+                          </td>
+                          {/* Acciones */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={()=>tenantAction('rotate-key', t.slug)}
+                                title="Rotar API key"
+                                className="p-1.5 text-white/25 hover:text-amber-400 transition-colors rounded-md hover:bg-amber-400/10">
+                                <Key size={13}/>
+                              </button>
+                              <button
+                                onClick={()=>tenantAction('reset-usage', t.slug)}
+                                title="Resetear uso mensual"
+                                className="p-1.5 text-white/25 hover:text-blue-400 transition-colors rounded-md hover:bg-blue-400/10">
+                                <RotateCcw size={13}/>
+                              </button>
+                              <button
+                                onClick={()=>tenantAction('toggle-admin', t.slug)}
+                                title={t.is_admin ? 'Revocar admin' : 'Hacer admin'}
+                                className={`p-1.5 transition-colors rounded-md ${
+                                  t.is_admin
+                                    ? 'text-violet-400 hover:text-white/40 hover:bg-white/5'
+                                    : 'text-white/25 hover:text-violet-400 hover:bg-violet-400/10'
+                                }`}>
+                                <Shield size={13}/>
+                              </button>
+                              {t.slug !== 'adolfo' && (
+                                <button
+                                  onClick={()=>{ if(confirm(`¿Eliminar tenant "${t.name}"?`)) tenantAction('delete', t.slug) }}
+                                  title="Eliminar tenant"
+                                  className="p-1.5 text-white/25 hover:text-red-400 transition-colors rounded-md hover:bg-red-400/10">
+                                  <Trash2 size={13}/>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Crear nuevo tenant */}
+            <div className="rounded-xl border border-white/8 bg-[#1a1a1a] p-5">
+              <h3 className="text-xs uppercase tracking-widest text-white/30 mb-4 flex items-center gap-2">
+                <Plus size={12}/> Nuevo tenant
+              </h3>
+              <div className="flex gap-3 flex-wrap">
+                <input
+                  value={newSlug} onChange={e=>setNewSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))}
+                  placeholder="slug (ej: acme-corp)"
+                  className="flex-1 min-w-[140px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/25"/>
+                <input
+                  value={newName} onChange={e=>setNewName(e.target.value)}
+                  placeholder="Nombre empresa"
+                  className="flex-1 min-w-[180px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-white/25"/>
+                <select
+                  value={newPlan} onChange={e=>setNewPlan(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/70 focus:outline-none focus:border-white/25">
+                  <option value="basic">Basic (500/mes)</option>
+                  <option value="pro">Pro (5,000/mes)</option>
+                  <option value="enterprise">Enterprise (∞)</option>
+                </select>
+                <button
+                  onClick={createTenant}
+                  disabled={creating || !newSlug || !newName}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-30 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+                  {creating ? <RefreshCw size={13} className="animate-spin"/> : <Plus size={13}/>}
+                  Crear
+                </button>
+              </div>
+            </div>
+
+            {/* Nota admin */}
+            <div className="rounded-xl border border-violet-500/15 bg-violet-500/5 p-4 flex gap-3">
+              <Shield size={14} className="text-violet-400 mt-0.5 shrink-0"/>
+              <p className="text-xs text-white/40 leading-relaxed">
+                Los tenants <strong className="text-violet-400">Admin</strong> tienen acceso irrestricto — sin rate limits, sin conteo de plan.
+                Instala SinergyOS en tu servidor con la <strong className="text-white/60">sinergy-founder-key</strong> y opera sin restricciones.
+                Otros tenants usan su plan (Basic/Pro/Enterprise) con límite mensual y reset automático.
               </p>
             </div>
           </div>

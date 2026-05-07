@@ -80,6 +80,7 @@ interface UsageProvider { provider:string; input_tokens:number; output_tokens:nu
 interface UsageMonth { month:string; provider:string; tokens:number; cost:number; queries:number }
 interface LimitsData { ts:string; anthropic:{provider:string;headers:AnthropicHeaders;error:string|null}; openai:{provider:string;headers:OpenAIHeaders;error:string|null}; usage:{by_provider:UsageProvider[];by_month:UsageMonth[];today:{q:number;cost:number}}; cached:boolean; cache_age_s:number }
 interface TenantRow { id:number; slug:string; name:string; plan:string; req_used:number; req_limit:number; usage_pct:number; is_admin:boolean }
+interface TenantCost { tenant_slug:string; queries:number; actual_cost:number; baseline_cost:number; savings:number; cost_this_month:number; queries_this_month:number }
 
 // ── Topic metadata ─────────────────────────────────────────────────────────
 
@@ -754,6 +755,7 @@ export default function Dashboard() {
   const [refreshing,   setRefreshing]   = useState(false)
   // Tenants (InsForge)
   const [tenants,        setTenants]        = useState<TenantRow[]>([])
+  const [tenantCosts,    setTenantCosts]    = useState<TenantCost[]>([])
   const [tenantsLoading, setTenantsLoading] = useState(false)
   const [newSlug,        setNewSlug]        = useState('')
   const [newName,        setNewName]        = useState('')
@@ -793,8 +795,12 @@ export default function Dashboard() {
   const loadTenants = useCallback(async () => {
     setTenantsLoading(true)
     try {
-      const data = await fetch('/sinergy/api/tenants', { cache: 'no-store' }).then(r => r.json())
-      if (Array.isArray(data)) setTenants(data)
+      const [td, cd] = await Promise.all([
+        fetch('/sinergy/api/tenants', { cache: 'no-store' }).then(r => r.json()),
+        fetch('/sinergy/api/costs?endpoint=by_tenant', { cache: 'no-store' }).then(r => r.json()),
+      ])
+      if (Array.isArray(td)) setTenants(td)
+      if (Array.isArray(cd)) setTenantCosts(cd)
     } catch { /* silent */ }
     setTenantsLoading(false)
   }, [])
@@ -1532,8 +1538,8 @@ export default function Dashboard() {
                 {[
                   { label:'Total tenants', value: tenants.length, color:'text-white' },
                   { label:'Admins',        value: tenants.filter(t=>t.is_admin).length, color:'text-violet-400' },
-                  { label:'Requests hoy',  value: tenants.reduce((s,t)=>s+t.req_used,0).toLocaleString(), color:'text-green-400' },
-                  { label:'Plan Pro+',     value: tenants.filter(t=>t.plan!=='basic').length, color:'text-amber-400' },
+                  { label:'Requests mes',  value: tenants.reduce((s,t)=>s+t.req_used,0).toLocaleString(), color:'text-green-400' },
+                  { label:'Costo mes',     value: '$'+tenantCosts.filter(c=>c.tenant_slug!=='__internal__').reduce((s,c)=>s+c.cost_this_month,0).toFixed(4), color:'text-amber-400' },
                 ].map(c=>(
                   <div key={c.label} className="rounded-xl border border-white/8 bg-[#1a1a1a] p-4">
                     <p className="text-[10px] text-white/30 uppercase tracking-widest mb-1">{c.label}</p>
@@ -1555,7 +1561,7 @@ export default function Dashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/8 text-white/25 text-[11px] uppercase tracking-wider">
-                      {['Tenant','Plan','Uso del mes','API Key','Acciones'].map(h=>(
+                      {['Tenant','Plan','Uso del mes','Costo (mes/total)','API Key','Acciones'].map(h=>(
                         <th key={h} className="text-left px-5 py-3 font-medium">{h}</th>
                       ))}
                     </tr>
@@ -1565,6 +1571,7 @@ export default function Dashboard() {
                       const pct = t.req_limit >= 999999 ? null : t.usage_pct
                       const barColor = !pct ? 'bg-violet-500' : pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-green-500'
                       const planColor: Record<string,string> = { basic:'text-white/40', pro:'text-amber-400', enterprise:'text-violet-400' }
+                      const tc = tenantCosts.find(c => c.tenant_slug === t.slug)
                       return (
                         <tr key={t.id} className="border-b border-white/5 hover:bg-white/2">
                           {/* Nombre */}
@@ -1605,6 +1612,22 @@ export default function Dashboard() {
                                 </div>
                                 <p className="text-[10px] text-white/30 mt-0.5 text-right">{pct}%</p>
                               </div>
+                            )}
+                          </td>
+                          {/* Costo */}
+                          <td className="px-5 py-4">
+                            {tc ? (
+                              <div>
+                                <p className="text-xs font-mono text-green-400 font-semibold">
+                                  ${(tc.cost_this_month).toFixed(4)}
+                                  <span className="text-white/25 font-normal"> /mes</span>
+                                </p>
+                                <p className="text-[10px] text-white/25 font-mono mt-0.5">
+                                  ${(tc.actual_cost).toFixed(4)} total · {tc.queries.toLocaleString()} q
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-white/15 text-xs">—</span>
                             )}
                           </td>
                           {/* API Key */}

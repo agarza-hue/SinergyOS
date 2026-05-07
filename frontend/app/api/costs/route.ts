@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     by_topic:       '/costs/by_topic',
     by_provider:    '/costs/by_provider',
     topic_by_model: '/costs/topic_by_model',
+    by_tenant:      '/costs/by_tenant',
   }
 
   const path = pathMap[endpoint] ?? '/costs/summary'

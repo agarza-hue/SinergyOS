@@ -1,5 +1,6 @@
 frontend/.next/
 frontend/node_modules/
+frontend/.env.local
 core/brain/__pycache__/
 core/brain/.env
 *.pyc
